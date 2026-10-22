@@ -1,15 +1,16 @@
 // Runs every morning (see "crons" in vercel.json): notifies every subscribed phone when plants need water.
 import { GARDEN, deleteDocument, firestoreConfigured, getDocument, listDocuments, updateFields } from '../lib/firestore.js';
-import { dueReminder, pushSubject, toSubscription, todayIn } from '../lib/reminders.js';
-import { sendNotification, vapidKeys } from '../lib/webpush.js';
+import { dueReminder, pushKeys, pushSubject, toSubscription, todayIn } from '../lib/reminders.js';
+import { sendNotification } from '../lib/webpush.js';
 
 export default async function handler(req, res) {
   // Vercel sends this header on scheduled runs when a CRON_SECRET environment variable is set.
   if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  if (!process.env.VAPID_PRIVATE_KEY || !firestoreConfigured()) {
-    return res.status(503).json({ error: 'Reminders are not configured' });
+  const { keys, problem } = pushKeys();
+  if (problem || !firestoreConfigured()) {
+    return res.status(503).json({ error: problem ?? 'Firebase is not configured' });
   }
 
   const today = todayIn(process.env.TIME_ZONE || 'Asia/Jerusalem');
@@ -20,7 +21,7 @@ export default async function handler(req, res) {
   if (!message) return res.status(200).json({ due: 0 });
 
   const subscribers = await listDocuments(`${GARDEN}/subscribers`);
-  const options = { keys: vapidKeys(process.env.VAPID_PRIVATE_KEY), subject: pushSubject(req) };
+  const options = { keys, subject: pushSubject(req) };
   let sent = 0;
   let removed = 0;
   for (const subscriber of subscribers) {

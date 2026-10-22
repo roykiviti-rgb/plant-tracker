@@ -1,15 +1,17 @@
 // Sends a test notification to one phone, so the "send a test" button can prove the whole path works.
+// A GET request only reports whether the server is set up to send (handy after changing settings in Vercel).
 import { GARDEN, deleteDocument, firestoreConfigured, getDocument, updateFields } from '../lib/firestore.js';
-import { TEST_MESSAGE, pushSubject, toSubscription } from '../lib/reminders.js';
-import { sendNotification, vapidKeys } from '../lib/webpush.js';
+import { TEST_MESSAGE, pushKeys, pushSubject, toSubscription } from '../lib/reminders.js';
+import { sendNotification } from '../lib/webpush.js';
 
 const COOLDOWN_MS = 30 * 1000;
 
 export default async function handler(req, res) {
+  const { keys, problem } = pushKeys();
+  const setupProblem = problem ?? (firestoreConfigured() ? null : 'Firebase is not configured');
+  if (req.method === 'GET') return res.status(200).json({ ready: !setupProblem, problem: setupProblem ?? undefined });
   if (req.method !== 'POST') return res.status(405).json({ error: 'Use POST' });
-  if (!process.env.VAPID_PRIVATE_KEY || !firestoreConfigured()) {
-    return res.status(503).json({ error: 'Reminders are not configured' });
-  }
+  if (setupProblem) return res.status(503).json({ error: setupProblem });
 
   const id = String(req.body?.id ?? '');
   if (!/^[a-f0-9]{64}$/.test(id)) return res.status(400).json({ error: 'Bad subscriber id' });
@@ -21,8 +23,7 @@ export default async function handler(req, res) {
   }
 
   await updateFields(path, { lastTest: new Date().toISOString() });
-  const options = { keys: vapidKeys(process.env.VAPID_PRIVATE_KEY), subject: pushSubject(req) };
-  const status = await sendNotification(toSubscription(subscriber), TEST_MESSAGE, options);
+  const status = await sendNotification(toSubscription(subscriber), TEST_MESSAGE, { keys, subject: pushSubject(req) });
   if (status === 404 || status === 410) {
     await deleteDocument(path);
     return res.status(410).json({ error: 'Subscription expired' });

@@ -76,7 +76,14 @@ const SUBSCRIBER_ID = 'a'.repeat(64);
 beforeEach(() => {
   docs.clear();
   pushes.length = 0;
-  Object.assign(process.env, { FIREBASE_PROJECT_ID: 'demo', FIREBASE_API_KEY: 'test-key', VAPID_PRIVATE_KEY: newPrivateKey(), TIME_ZONE: 'Asia/Jerusalem' });
+  const privateKey = newPrivateKey();
+  Object.assign(process.env, {
+    FIREBASE_PROJECT_ID: 'demo',
+    FIREBASE_API_KEY: 'test-key',
+    VAPID_PRIVATE_KEY: privateKey,
+    VAPID_PUBLIC_KEY: vapidKeys(privateKey).publicKey,
+    TIME_ZONE: 'Asia/Jerusalem',
+  });
   delete process.env.CRON_SECRET;
   docs.set('gardens/main', { initialized: true });
   docs.set('gardens/main/plants/mint', { name: 'נענע', intervalDays: 2, history: [addDays(TODAY, -3)], order: 0 });
@@ -131,7 +138,8 @@ test('expired phones are removed and CRON_SECRET is enforced', async () => {
 });
 
 test('test-push checks its input and sends one encrypted test message', async () => {
-  assert.equal((await call(testPush, { method: 'GET' })).statusCode, 405);
+  assert.deepEqual((await call(testPush, { method: 'GET' })).body, { ready: true, problem: undefined });
+  assert.equal((await call(testPush, { method: 'PUT' })).statusCode, 405);
   assert.equal((await call(testPush, { method: 'POST', body: { id: 'nope' } })).statusCode, 400);
   assert.equal((await call(testPush, { method: 'POST', body: { id: 'b'.repeat(64) } })).statusCode, 404);
 
@@ -139,6 +147,17 @@ test('test-push checks its input and sends one encrypted test message', async ()
   assert.equal(ok.statusCode, 200);
   assert.equal(JSON.parse(decrypt(pushes[0].body)).tag, 'test');
   assert.equal((await call(testPush, { method: 'POST', body: { id: SUBSCRIBER_ID } })).statusCode, 429);
+});
+
+test('a key pasted together with its name still works; a different key is reported clearly', async () => {
+  process.env.VAPID_PRIVATE_KEY = `VAPID_PRIVATE_KEY=${process.env.VAPID_PRIVATE_KEY}`;
+  assert.equal((await call(testPush, { method: 'POST', body: { id: SUBSCRIBER_ID } })).statusCode, 200);
+
+  process.env.VAPID_PRIVATE_KEY = newPrivateKey();
+  const problem = 'VAPID_PRIVATE_KEY does not match VAPID_PUBLIC_KEY in public/js/config.js';
+  assert.deepEqual((await call(testPush, { method: 'GET' })).body, { ready: false, problem });
+  assert.deepEqual((await call(remind, { method: 'GET' })).body, { error: problem });
+  assert.equal(pushes.length, 1);
 });
 
 test('handlers answer 503 until the push key is configured', async () => {

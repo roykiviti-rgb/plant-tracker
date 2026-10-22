@@ -608,7 +608,7 @@ async function onReminderAction(action) {
       reminder.subscription = await task;
       const status = await reminders.sendTestReminder(reminder.subscription).catch(() => 0);
       showToast(status === 200 ? 'התזכורת הופעלה. עכשיו אמורה להגיע התראת בדיקה.' : status === 503
-        ? 'התזכורת נשמרה, אבל השרת עוד לא מוכן לשלוח התראות (חסר מפתח ב-Vercel).'
+        ? 'התזכורת נשמרה, אבל השרת עוד לא מוכן לשלוח התראות (המפתח ב-Vercel חסר או שגוי).'
         : 'התזכורת נשמרה, אבל התראת הבדיקה לא נשלחה.');
     } else if (action === 'off') {
       await task;
@@ -622,7 +622,7 @@ async function onReminderAction(action) {
         429: 'התראת בדיקה נשלחה לפני רגע. אפשר לנסות שוב בעוד חצי דקה.',
         404: 'השרת לא מכיר את הטלפון הזה. צריך להפעיל את התזכורת מחדש.',
         410: 'ההרשמה פגה. צריך להפעיל את התזכורת מחדש.',
-        503: 'השרת עוד לא מוכן לשלוח התראות (חסר מפתח ב-Vercel).',
+        503: 'השרת עוד לא מוכן לשלוח התראות (המפתח ב-Vercel חסר או שגוי).',
       }[status] ?? 'שליחת התראת הבדיקה נכשלה.');
     }
   } catch (error) {
