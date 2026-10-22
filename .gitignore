@@ -1,0 +1,10 @@
+node_modules/
+.vercel/
+.claude/
+
+# Original full-size photos (the site uses the resized copies in public/plants/)
+תמונות/
+
+.DS_Store
+Thumbs.db
+desktop.ini

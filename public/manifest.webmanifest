@@ -1,0 +1,18 @@
+{
+  "name": "הצמחים שלי · מעקב השקיה",
+  "short_name": "הצמחים שלי",
+  "description": "מתי השקיתי כל צמח ומתי צריך להשקות שוב",
+  "lang": "he",
+  "dir": "rtl",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f5ee",
+  "theme_color": "#f3f5ee",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

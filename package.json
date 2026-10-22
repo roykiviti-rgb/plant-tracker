@@ -1,0 +1,11 @@
+{
+  "name": "plant-watering-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plant watering tracker: a static site in public/, ready for Vercel.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/serve.js",
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>הצמחים שלי · מעקב השקיה</title>
+  <meta name="description" content="מעקב פשוט אחרי השקיית הצמחים: מתי השקיתי לאחרונה ומתי צריך להשקות שוב.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3f5ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1612" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="הצמחים שלי">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="css/styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3c3.2 4.1 6 7.6 6 11a6 6 0 0 1-12 0c0-3.4 2.8-6.9 6-11z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 8.5l3 3"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.5-2h5L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7 10l5-5 5 5M5 20h14"/></symbol>
+    <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M5 19c0-8 5.5-14 15-14 0 9.5-6 15-15 14z"/><path d="M5 19c2.5-4 5.5-6.5 9.5-8.5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/></symbol>
+  </svg>
+
+  <header class="app-header container">
+    <div class="brand">
+      <img class="brand-icon" src="icons/icon.svg" alt="" width="46" height="46">
+      <div>
+        <h1>הצמחים שלי</h1>
+        <p class="today" id="today"></p>
+      </div>
+    </div>
+    <button type="button" class="btn btn-primary" id="add-btn">
+      <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span>צמח חדש</span>
+    </button>
+  </header>
+
+  <main class="container">
+    <noscript><p class="notice">האתר צריך JavaScript כדי לעבוד.</p></noscript>
+    <p class="notice" id="storage-warning" hidden>הדפדפן לא מאפשר לשמור נתונים (אולי בגלל גלישה פרטית), ולכן השינויים יימחקו כשהדף ייסגר.</p>
+    <section class="summary" id="summary" aria-live="polite" hidden></section>
+    <div class="filters" id="filters" role="group" aria-label="סינון לפי מיקום" hidden></div>
+    <ul class="plant-list" id="plant-list" aria-label="רשימת הצמחים"></ul>
+    <div class="empty" id="empty" hidden>
+      <img src="icons/icon.svg" alt="" width="72" height="72">
+      <h2>עוד אין צמחים ברשימה</h2>
+      <p>מוסיפים צמח, קובעים כל כמה ימים להשקות אותו, והאתר מראה מתי הגיע הזמן.</p>
+      <button type="button" class="btn btn-primary" data-action="add">
+        <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span>הוספת צמח</span>
+      </button>
+      <button type="button" class="btn btn-ghost" data-action="restore-seed">טעינת רשימת הצמחים ההתחלתית</button>
+    </div>
+  </main>
+
+  <footer class="app-footer container">
+    <p>הנתונים נשמרים בדפדפן של המכשיר הזה בלבד. כדאי לשמור גיבוי מדי פעם; אפשר לטעון אותו גם במכשיר אחר.</p>
+    <div class="footer-actions">
+      <button type="button" class="btn btn-secondary" id="export-btn">
+        <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>שמירת גיבוי</span>
+      </button>
+      <button type="button" class="btn btn-secondary" id="import-btn">
+        <svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><span>טעינת גיבוי</span>
+      </button>
+      <input type="file" id="import-input" accept="application/json,.json" hidden>
+    </div>
+  </footer>
+
+  <dialog id="details" aria-labelledby="details-title">
+    <div class="sheet" id="details-body"></div>
+  </dialog>
+
+  <dialog id="edit" aria-labelledby="edit-title">
+    <form class="sheet" id="edit-form">
+      <div class="sheet-content">
+        <div class="sheet-head">
+          <h2 id="edit-title">צמח חדש</h2>
+          <button type="button" class="icon-btn" data-close aria-label="סגירה">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+          </button>
+        </div>
+
+        <div class="photo-field">
+          <div class="photo-preview" id="photo-preview"></div>
+          <div class="photo-buttons">
+            <button type="button" class="btn btn-secondary" id="photo-pick">
+              <svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg><span>תמונה</span>
+            </button>
+            <button type="button" class="btn btn-ghost" id="photo-remove">הסרת התמונה</button>
+            <input type="file" id="photo-input" accept="image/*" hidden>
+            <p class="error" id="photo-error" hidden>לא הצלחתי לקרוא את התמונה. אפשר לנסות תמונה אחרת.</p>
+          </div>
+        </div>
+
+        <fieldset class="emoji-field" id="emoji-field">
+          <legend>או אייקון</legend>
+          <div class="emoji-options" id="emoji-options"></div>
+        </fieldset>
+
+        <label class="field">
+          <span class="field-label">שם הצמח</span>
+          <input class="input" id="f-name" required maxlength="60" autocomplete="off" placeholder="למשל: מונסטרה">
+        </label>
+
+        <label class="field">
+          <span class="field-label">מיקום</span>
+          <input class="input" id="f-location" list="location-list" maxlength="40" autocomplete="off" placeholder="למשל: מרפסת">
+          <datalist id="location-list"></datalist>
+        </label>
+
+        <div class="field">
+          <label class="field-label" for="f-interval">כל כמה ימים להשקות?</label>
+          <div class="interval-row">
+            <input class="input" type="number" id="f-interval" min="1" max="365" step="1" required inputmode="numeric">
+            <span>ימים</span>
+          </div>
+          <div class="chips" id="interval-chips">
+            <button type="button" class="chip" data-days="1">כל יום</button>
+            <button type="button" class="chip" data-days="2">כל יומיים</button>
+            <button type="button" class="chip" data-days="3">כל 3 ימים</button>
+            <button type="button" class="chip" data-days="7">פעם בשבוע</button>
+            <button type="button" class="chip" data-days="14">פעם בשבועיים</button>
+          </div>
+        </div>
+
+        <div class="field" id="last-field">
+          <label class="field-label" for="f-last">מתי השקיתם לאחרונה?</label>
+          <input class="input" type="date" id="f-last">
+          <div class="chips" id="last-chips">
+            <button type="button" class="chip" data-ago="0">היום</button>
+            <button type="button" class="chip" data-ago="1">אתמול</button>
+            <button type="button" class="chip" data-ago="2">שלשום</button>
+          </div>
+          <small>אפשר להשאיר ריק ולסמן אחר כך.</small>
+        </div>
+
+        <label class="field">
+          <span class="field-label">הערות וטיפים</span>
+          <textarea class="input" id="f-notes" rows="3" maxlength="500" placeholder="למשל: להשקות עד שהמים יוצאים מלמטה"></textarea>
+        </label>
+
+        <p class="error" id="form-error" hidden>השמירה נכשלה, כנראה כי אין מספיק מקום בדפדפן. אפשר לנסות בלי תמונה.</p>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">שמירה</button>
+          <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+    <span class="toast-text" id="toast-text"></span>
+    <button type="button" id="toast-undo">ביטול</button>
+  </div>
+</body>
+</html>
