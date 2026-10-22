@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   todayISO, isISODate, addDays, diffDays, plantStatus, sortPlants, addWatering, removeWatering, snoozePlant,
   averageInterval, daysWord, dueLabel, agoText, intervalText, normalizeState, thumbOf,
+  diffPlants, restorePlants, mergeLocalPlants,
 } from '../public/js/logic.js';
 import { createSeedState } from '../public/js/seed.js';
 
@@ -140,6 +141,50 @@ test('the starting plant list is valid and survives a save/load round trip', () 
   assert.equal(seed.plants.length, 14);
   assert.deepEqual(normalizeState(JSON.parse(JSON.stringify(seed))), seed);
   assert.equal(new Set(seed.plants.map((p) => p.id)).size, seed.plants.length);
+});
+
+test('normalizeState keeps list order, filling it in for data saved before it existed', () => {
+  const { plants } = normalizeState({ plants: [{ id: 'b', name: 'ב', order: 5000 }, { id: 'a', name: 'א' }, { id: 'c', name: 'ג', order: 1 }] });
+  assert.deepEqual(plants.map((p) => [p.id, p.order]), [['c', 1], ['a', 1000], ['b', 5000]]);
+});
+
+test('diffPlants finds added, edited and removed plants', () => {
+  const a = plant({ id: 'a', order: 0 });
+  const b = plant({ id: 'b', order: 1 });
+  const c = plant({ id: 'c', order: 2 });
+  const editedB = addWatering(b, TODAY);
+  const { upserts, deletes } = diffPlants([a, b, c], [a, editedB, plant({ id: 'd', order: 3 })]);
+  assert.deepEqual(upserts.map((p) => p.id), ['b', 'd']);
+  assert.deepEqual(deletes, ['c']);
+});
+
+test('restorePlants undoes only the plants an action touched', () => {
+  const a = plant({ id: 'a', order: 0 });
+  const b = plant({ id: 'b', order: 1 });
+  const before = [a, b];
+  // The action watered "a" and deleted "b"; meanwhile someone else watered a new plant "x".
+  const x = plant({ id: 'x', order: 2, history: [TODAY] });
+  const current = [addWatering(a, TODAY), x];
+  const undone = restorePlants(current, before, ['a', 'b']);
+  assert.deepEqual(undone.map((p) => p.id), ['a', 'b', 'x']);
+  assert.equal(undone[0], a);
+  assert.deepEqual(undone[2].history, [TODAY]);
+  // Undoing an "add" removes the added plant.
+  assert.deepEqual(restorePlants([a, x], [a], ['x']).map((p) => p.id), ['a']);
+});
+
+test('mergeLocalPlants brings earlier waterings and this device\'s new plants into the shared list', () => {
+  const cloud = [plant({ id: 'mint', history: ['2026-10-20'] }), plant({ id: 'zz', history: [] })];
+  const local = [
+    plant({ id: 'mint', history: ['2026-10-21', '2026-10-20'] }),
+    plant({ id: 'zz', history: [] }),
+    plant({ id: 'palm', history: ['2026-10-19'] }), // a starting plant deleted in the cloud: stays deleted
+    plant({ id: 'p-abc-123', name: 'מונסטרה', history: [] }), // added on this device
+  ];
+  const changes = mergeLocalPlants(local, cloud);
+  assert.deepEqual(changes.map((p) => p.id), ['mint', 'p-abc-123']);
+  assert.deepEqual(changes[0].history, ['2026-10-21', '2026-10-20']);
+  assert.deepEqual(mergeLocalPlants(cloud, cloud), []);
 });
 
 test('thumbOf maps bundled photos to their thumbnails', () => {

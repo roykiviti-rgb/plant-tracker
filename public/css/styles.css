@@ -346,6 +346,93 @@ button {
   }
 }
 
+/* ---------- Daily reminder ---------- */
+
+.reminders {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px dashed color-mix(in srgb, var(--water) 45%, var(--border));
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.plant-list + .reminders {
+  margin: 16px 0 0;
+}
+
+.reminders.is-on {
+  border-style: solid;
+  border-color: var(--border);
+}
+
+.reminders-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 14px;
+  background: var(--water-soft);
+  color: var(--water-ink);
+}
+
+.reminders.is-on .reminders-icon {
+  background: var(--ok-soft);
+  color: var(--ok-ink);
+}
+
+.reminders-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.reminders h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.reminders p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.reminders-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reminders-actions:empty {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .reminders {
+    flex-wrap: wrap;
+  }
+
+  .reminders-actions {
+    width: 100%;
+  }
+
+  .reminders-actions .btn {
+    flex: 1;
+  }
+}
+
+.sync-badge[data-status="offline"],
+.sync-badge[data-status="saving"] {
+  color: var(--warn-ink);
+}
+
+.sync-badge[data-status="error"] {
+  color: var(--danger);
+}
+
 /* ---------- Location filter ---------- */
 
 .filters {

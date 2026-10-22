@@ -1,9 +1,11 @@
 import {
   todayISO, addDays, diffDays, isISODate, formatDate, plantStatus, sortPlants, addWatering, removeWatering,
   snoozePlant, averageInterval, daysWord, dueLabel, agoText, intervalText, thumbOf, newId, normalizeState,
+  diffPlants, restorePlants, mergeLocalPlants,
 } from './logic.js';
 import { STORAGE_KEY, loadState, saveState, storageAvailable, readPref, writePref, requestPersistence } from './store.js';
 import { createSeedState } from './seed.js';
+import { firebaseConfig } from './config.js';
 
 const EMOJIS = ['🪴', '🌿', '🌱', '🍃', '🌵', '🌴', '🌸', '🌼', '🌻', '🌷', '🪻', '🍅', '🌶️', '🍓'];
 const LOCATION_IDEAS = ['מרפסת', 'בבית', 'סלון', 'מטבח', 'חדר שינה', 'גינה'];
@@ -19,11 +21,14 @@ const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').match
 
 const els = {
   today: $('#today'),
+  syncBadge: $('#sync-badge'),
   storageWarning: $('#storage-warning'),
   summary: $('#summary'),
+  reminders: $('#reminders'),
   filters: $('#filters'),
   list: $('#plant-list'),
   empty: $('#empty'),
+  dataNote: $('#data-note'),
   details: $('#details'),
   detailsBody: $('#details-body'),
   edit: $('#edit'),
@@ -34,6 +39,9 @@ const els = {
   importInput: $('#import-input'),
 };
 
+// With a Firebase project configured, the garden is shared through Firestore; otherwise it lives in this browser.
+// Either way, the last known list is kept in localStorage so the page opens instantly, even offline.
+const cloudMode = Boolean(firebaseConfig);
 const canStore = storageAvailable();
 let state = loadState();
 if (!state) {
@@ -46,13 +54,21 @@ let openPlantId = null;
 let editingId = null;
 let draftPhoto = null;
 
+let cloud = null; // cloud.js, once loaded
+let cloudReady = readPref('cloud-synced') === '1'; // this device has already merged its data into the shared garden
+let syncStatus = cloudMode ? 'connecting' : 'local';
+let syncError = '';
+const pendingWrites = new Map(); // plant id -> plant, or null to delete; sent once the cloud is ready
+
 // ---------- Saving ----------
 
 /** Saves and redraws. Returns false (and changes nothing) if the browser refused to save. */
 function commit(plants, { animate = false, highlight = [] } = {}) {
+  const previous = state.plants;
   const next = { ...state, plants };
-  if (!saveState(next) && canStore) return false;
+  if (!saveState(next) && canStore && !cloudMode) return false;
   state = next;
+  if (cloudMode) queueCloudWrites(previous, plants);
   const update = () => {
     render();
     for (const id of highlight) {
@@ -68,6 +84,93 @@ function updatePlant(id, change, options) {
   return commit(state.plants.map((p) => (p.id === id ? change(p) : p)), options);
 }
 
+/** An undo button action that puts back the given plants as they were in `previous`. */
+function undoFor(previous, ids) {
+  return () => commit(restorePlants(state.plants, previous, ids), { animate: true });
+}
+
+// ---------- Shared garden (Firebase) ----------
+
+async function startCloud() {
+  try {
+    cloud = await import('./cloud.js');
+    await cloud.connect(firebaseConfig);
+    flushCloudWrites();
+    cloud.watchPlants(onCloudPlants, onCloudError);
+  } catch (error) {
+    onCloudError(error);
+  }
+}
+
+function queueCloudWrites(previous, plants) {
+  const { upserts, deletes } = diffPlants(previous, plants);
+  for (const plant of upserts) pendingWrites.set(plant.id, plant);
+  for (const id of deletes) pendingWrites.set(id, null);
+  flushCloudWrites();
+}
+
+function flushCloudWrites() {
+  if (!cloud || !cloudReady || !pendingWrites.size) return;
+  const writes = [...pendingWrites];
+  pendingWrites.clear();
+  cloud.savePlants(writes.filter(([, p]) => p).map(([, p]) => p), writes.filter(([, p]) => !p).map(([id]) => id))
+    .catch(onCloudError);
+}
+
+function onCloudPlants(docs, meta) {
+  syncStatus = meta.pending ? 'saving' : meta.fromCache ? (navigator.onLine ? 'connecting' : 'offline') : 'synced';
+  syncError = '';
+  // An empty list straight from the device cache only means nothing was cached yet; wait for the server.
+  if (meta.fromCache && !docs.length) return renderSync();
+  if (!cloudReady) {
+    if (meta.fromCache) return renderSync();
+    cloudReady = true;
+    firstSync(docs);
+    return;
+  }
+  applyCloudPlants(docs);
+}
+
+/** The first time this device reaches the server: start the garden, or add this device's earlier records to it. */
+async function firstSync(docs) {
+  const local = state.plants;
+  pendingWrites.clear(); // what they would have written is covered by the merge below
+  try {
+    if (!docs.length && await cloud.setUpGarden(local)) {
+      writePref('cloud-synced', '1');
+      return; // the snapshot that follows brings the new garden
+    }
+    applyCloudPlants(docs);
+    const changes = mergeLocalPlants(local, state.plants);
+    if (changes.length) await cloud.savePlants(changes);
+    writePref('cloud-synced', '1');
+  } catch (error) {
+    cloudReady = false;
+    onCloudError(error);
+  }
+}
+
+function applyCloudPlants(docs) {
+  const plants = normalizeState({ plants: docs }).plants;
+  const changed = JSON.stringify(plants) !== JSON.stringify(state.plants);
+  state = { ...state, plants };
+  if (changed) {
+    saveState(state);
+    render();
+  } else {
+    renderSync();
+  }
+}
+
+function onCloudError(error) {
+  console.error(error);
+  syncStatus = 'error';
+  syncError = error?.code === 'permission-denied'
+    ? 'אין הרשאה לרשימה המשותפת: צריך לפרסם את כללי האבטחה ב-Firebase (הקובץ firestore.rules).'
+    : 'לא הצלחתי להתחבר לרשימה המשותפת. מוצגת הרשימה שנשמרה במכשיר, ושינויים יישלחו כשהחיבור יחזור.';
+  renderSync();
+}
+
 // ---------- Actions ----------
 
 function waterPlants(ids, date = todayISO()) {
@@ -77,7 +180,7 @@ function waterPlants(ids, date = todayISO()) {
   if (!saved) return showToast('השמירה נכשלה');
   requestPersistence();
   const name = previous.find((p) => p.id === ids[0])?.name;
-  showToast(ids.length === 1 ? `נרשמה השקיה: ${name}` : `נרשמה השקיה ל-${ids.length} צמחים`, () => commit(previous, { animate: true }));
+  showToast(ids.length === 1 ? `נרשמה השקיה: ${name}` : `נרשמה השקיה ל-${ids.length} צמחים`, undoFor(previous, ids));
 }
 
 function snooze(id) {
@@ -86,14 +189,14 @@ function snooze(id) {
   if (!updatePlant(id, (p) => snoozePlant(p, today), { animate: true })) return showToast('השמירה נכשלה');
   const status = plantStatus(state.plants.find((p) => p.id === id), today);
   const when = status.kind === 'soon' ? 'למחר' : `ל${formatDate(status.nextDue, LONG_DATE)}`;
-  showToast(`ההשקיה נדחתה ${when}`, () => commit(previous, { animate: true }));
+  showToast(`ההשקיה נדחתה ${when}`, undoFor(previous, [id]));
 }
 
 function deletePlant(id) {
   const previous = state.plants;
   const plant = previous.find((p) => p.id === id);
   if (!commit(previous.filter((p) => p.id !== id), { animate: true })) return showToast('השמירה נכשלה');
-  showToast(`הצמח „${plant.name}” נמחק`, () => commit(previous, { animate: true }));
+  showToast(`הצמח „${plant.name}” נמחק`, undoFor(previous, [id]));
 }
 
 // ---------- Rendering ----------
@@ -102,7 +205,7 @@ function render() {
   const today = todayISO();
   renderedDay = today;
   els.today.textContent = formatDate(today, LONG_DATE);
-  els.storageWarning.hidden = canStore;
+  els.storageWarning.hidden = canStore || cloudMode;
 
   const locations = locationsOf(state.plants);
   if (filter !== 'all' && !locations.some((l) => l.name === filter)) filter = 'all';
@@ -111,9 +214,27 @@ function render() {
   renderFilters(locations);
   renderSummary(items);
   renderList(items, today);
+  renderSync();
+  renderReminders();
   els.empty.hidden = state.plants.length > 0;
   if (openPlantId && els.details.open) renderDetails();
   updateAppBadge(today);
+}
+
+function renderSync() {
+  const badges = { saving: 'שומר…', offline: 'לא מחובר', error: 'בעיית סנכרון' };
+  els.syncBadge.textContent = badges[syncStatus] ? ` · ${badges[syncStatus]}` : '';
+  els.syncBadge.dataset.status = syncStatus;
+
+  if (!cloudMode) {
+    els.dataNote.textContent = 'הנתונים נשמרים בדפדפן של המכשיר הזה בלבד. כדאי לשמור גיבוי מדי פעם; אפשר לטעון אותו גם במכשיר אחר.';
+  } else if (syncStatus === 'error') {
+    els.dataNote.textContent = syncError;
+  } else if (syncStatus === 'offline') {
+    els.dataNote.textContent = 'אין חיבור כרגע. השינויים נשמרים במכשיר ויישלחו לרשימה המשותפת כשהחיבור יחזור.';
+  } else {
+    els.dataNote.textContent = 'הרשימה משותפת: כל מי שפותח את האתר רואה אותה ויכול לסמן השקיה, והשינויים מתעדכנים אצל כולם מיד.';
+  }
 }
 
 function locationsOf(plants) {
@@ -364,7 +485,7 @@ function syncChips() {
   }
 }
 
-/** Crops a photo to a square and shrinks it so it fits comfortably in browser storage. */
+/** Crops a photo to a square and shrinks it so it fits comfortably in storage. */
 function resizePhoto(file, size = 480) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -405,7 +526,7 @@ function saveForm() {
     if (!updatePlant(editingId, (p) => ({ ...p, ...fields }))) return showFormError();
     message = 'השינויים נשמרו';
   } else {
-    let plant = { id: newId(), ...fields, history: [], snoozedUntil: null };
+    let plant = { id: newId(), ...fields, history: [], snoozedUntil: null, order: Date.now() };
     const last = $('#f-last').value;
     if (isISODate(last) && last <= todayISO()) plant = addWatering(plant, last);
     if (filter !== 'all' && plant.location !== filter) {
@@ -423,6 +544,97 @@ function showFormError() {
   $('#form-error').hidden = false;
 }
 
+// ---------- Daily reminder (shared garden only) ----------
+
+let reminders = null; // reminders.js, once loaded
+const reminder = { support: 'unsupported', subscription: null, busy: false, dismissed: readPref('reminder-dismissed') === '1' };
+
+async function startReminders() {
+  reminders = await import('./reminders.js');
+  reminder.support = reminders.pushSupport();
+  if (reminder.support === 'supported') reminder.subscription = await reminders.currentSubscription().catch(() => null);
+  renderReminders();
+}
+
+function renderReminders() {
+  const section = els.reminders;
+  section.hidden = !cloudMode || !reminders;
+  if (section.hidden) return;
+
+  const { support, subscription, busy } = reminder;
+  const denied = support === 'supported' && !subscription && Notification.permission === 'denied';
+  const invite = !subscription && support !== 'unsupported' && !denied && !reminder.dismissed;
+  let text;
+  const buttons = [];
+  if (subscription) {
+    text = 'פעילה בטלפון הזה: כל בוקר בין 7 ל-9 תגיע התראה, רק אם יש צמחים להשקות.';
+    buttons.push(['test', 'btn-secondary', 'שליחת התראת בדיקה'], ['off', 'btn-ghost', 'כיבוי']);
+  } else if (support === 'install-first') {
+    text = 'באייפון התזכורת עובדת רק מהאפליקציה שבמסך הבית: כפתור השיתוף ← „הוספה למסך הבית”, ואז פותחים את האתר מהאייקון.';
+  } else if (support === 'unsupported') {
+    text = 'הדפדפן הזה לא תומך בהתראות. אפשר להפעיל את התזכורת בטלפון.';
+  } else if (denied) {
+    text = 'ההתראות חסומות לאתר הזה. כדי לקבל תזכורת צריך לאשר התראות בהגדרות הטלפון או הדפדפן, ואז לחזור לכאן.';
+  } else {
+    text = 'כל בוקר בין 7 ל-9 תגיע לטלפון הזה התראה, רק בימים שיש צמחים להשקות.';
+    buttons.push(['on', 'btn-water', 'הפעלת תזכורת']);
+  }
+  if (invite) buttons.push(['later', 'btn-ghost', 'לא עכשיו']);
+
+  // While it's an open invitation it sits above the list; otherwise it waits below it.
+  if (invite) els.filters.before(section);
+  else els.list.after(section);
+  section.classList.toggle('is-on', Boolean(subscription));
+  $('#reminders-text').textContent = busy ? 'רגע…' : text;
+  $('#reminders-actions').innerHTML = buttons
+    .map(([action, style, label]) => `<button type="button" class="btn ${style}" data-reminder="${action}" ${busy ? 'disabled' : ''}>${label}</button>`)
+    .join('');
+}
+
+async function onReminderAction(action) {
+  if (action === 'later') {
+    reminder.dismissed = true;
+    writePref('reminder-dismissed', '1');
+    return renderReminders();
+  }
+  // enableReminders() asks for permission, so it has to start right here, inside the tap.
+  const task = action === 'on' ? reminders.enableReminders()
+    : action === 'off' ? reminders.disableReminders(reminder.subscription)
+    : reminders.sendTestReminder(reminder.subscription);
+  reminder.busy = true;
+  renderReminders();
+  try {
+    if (action === 'on') {
+      reminder.subscription = await task;
+      const status = await reminders.sendTestReminder(reminder.subscription).catch(() => 0);
+      showToast(status === 200 ? 'התזכורת הופעלה. עכשיו אמורה להגיע התראת בדיקה.' : status === 503
+        ? 'התזכורת נשמרה, אבל השרת עוד לא מוכן לשלוח התראות (חסר מפתח ב-Vercel).'
+        : 'התזכורת נשמרה, אבל התראת הבדיקה לא נשלחה.');
+    } else if (action === 'off') {
+      await task;
+      reminder.subscription = null;
+      showToast('התזכורת כובתה בטלפון הזה');
+    } else {
+      const status = await task;
+      if (status === 404 || status === 410) reminder.subscription = null;
+      showToast({
+        200: 'נשלחה התראת בדיקה. היא אמורה להגיע תוך כמה שניות.',
+        429: 'התראת בדיקה נשלחה לפני רגע. אפשר לנסות שוב בעוד חצי דקה.',
+        404: 'השרת לא מכיר את הטלפון הזה. צריך להפעיל את התזכורת מחדש.',
+        410: 'ההרשמה פגה. צריך להפעיל את התזכורת מחדש.',
+        503: 'השרת עוד לא מוכן לשלוח התראות (חסר מפתח ב-Vercel).',
+      }[status] ?? 'שליחת התראת הבדיקה נכשלה.');
+    }
+  } catch (error) {
+    showToast(error.message === 'denied' ? 'ההתראות נחסמו. אפשר לאשר אותן בהגדרות ולנסות שוב.'
+      : error.message === 'dismissed' ? 'לא אושרו התראות, אז התזכורת לא הופעלה.'
+      : 'לא הצלחתי להפעיל את התזכורת. כדאי לבדוק את החיבור לאינטרנט ולנסות שוב.');
+  } finally {
+    reminder.busy = false;
+    renderReminders();
+  }
+}
+
 // ---------- Toast ----------
 
 let toastTimer = null;
@@ -435,7 +647,7 @@ function showToast(message, undo = null) {
   els.toastUndo.hidden = !undo;
   els.toast.hidden = false;
   requestAnimationFrame(() => els.toast.classList.add('show'));
-  toastTimer = setTimeout(hideToast, undo ? 7000 : 3500);
+  toastTimer = setTimeout(hideToast, undo ? 7000 : 4000);
 }
 
 function hideToast() {
@@ -466,10 +678,12 @@ async function importBackup(file) {
     return showToast('הקובץ הזה לא נראה כמו גיבוי של האתר');
   }
   const count = (n) => (n === 1 ? 'צמח אחד' : `${n} צמחים`);
-  if (!confirm(`לטעון מהגיבוי ${count(next.plants.length)}? הרשימה הנוכחית (${count(state.plants.length)}) תוחלף.`)) return;
+  const shared = cloudMode ? ' אצל כל מי שמשתמש באתר' : '';
+  if (!confirm(`לטעון מהגיבוי ${count(next.plants.length)}? הרשימה הנוכחית (${count(state.plants.length)}) תוחלף${shared}.`)) return;
   const previous = state.plants;
+  const ids = [...new Set([...previous, ...next.plants].map((p) => p.id))];
   if (!commit(next.plants)) return showToast('הטעינה נכשלה: אין מספיק מקום בדפדפן');
-  showToast('הגיבוי נטען', () => commit(previous));
+  showToast('הגיבוי נטען', undoFor(previous, ids));
 }
 
 // ---------- App icon badge (installed app on supported devices) ----------
@@ -499,6 +713,11 @@ els.list.addEventListener('click', (event) => {
 els.summary.addEventListener('click', (event) => {
   const button = event.target.closest('[data-bulk]');
   if (button) waterPlants(button.dataset.bulk.split(' '));
+});
+
+els.reminders.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-reminder]');
+  if (button && !reminder.busy) onReminderAction(button.dataset.reminder);
 });
 
 els.filters.addEventListener('click', (event) => {
@@ -608,21 +827,36 @@ els.importInput.addEventListener('change', () => {
   if (file) importBackup(file);
 });
 
-// Redraw when the date changes (e.g. the page stayed open overnight) or another tab saved changes.
+// Redraw when the date changes (e.g. the page stayed open overnight).
 setInterval(() => {
   if (todayISO() !== renderedDay) render();
 }, 60 * 1000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && todayISO() !== renderedDay) render();
 });
-window.addEventListener('storage', (event) => {
-  if (event.key !== STORAGE_KEY) return;
-  state = loadState() ?? state;
-  render();
-});
+
+if (cloudMode) {
+  for (const type of ['online', 'offline']) {
+    window.addEventListener(type, () => {
+      if (syncStatus !== 'error') syncStatus = type === 'online' ? 'connecting' : 'offline';
+      renderSync();
+    });
+  }
+} else {
+  // Another tab of this browser saved changes.
+  window.addEventListener('storage', (event) => {
+    if (event.key !== STORAGE_KEY) return;
+    state = loadState() ?? state;
+    render();
+  });
+}
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
 render();
+if (cloudMode) {
+  startCloud();
+  startReminders();
+}

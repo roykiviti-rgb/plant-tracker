@@ -145,22 +145,61 @@ export function newId() {
   return `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** Validates data from storage or a backup file. Throws if it isn't plant data. */
+/** Validates data from storage, the cloud or a backup file, sorted in list order. Throws if it isn't plant data. */
 export function normalizeState(raw) {
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.plants)) throw new Error('Not plant data');
   const seen = new Set();
   const plants = [];
-  for (const item of raw.plants) {
-    const plant = normalizePlant(item);
-    if (!plant) continue;
+  raw.plants.forEach((item, index) => {
+    const plant = normalizePlant(item, index);
+    if (!plant) return;
     if (seen.has(plant.id)) plant.id = newId();
     seen.add(plant.id);
     plants.push(plant);
-  }
+  });
+  plants.sort((a, b) => a.order - b.order);
   return { version: 1, plants };
 }
 
-function normalizePlant(p) {
+/** Which plants a change added or edited (by reference: plants are never modified in place) and which it removed. */
+export function diffPlants(previous, next) {
+  const before = new Map(previous.map((p) => [p.id, p]));
+  const after = new Set(next.map((p) => p.id));
+  return {
+    upserts: next.filter((p) => before.get(p.id) !== p),
+    deletes: previous.filter((p) => !after.has(p.id)).map((p) => p.id),
+  };
+}
+
+/** Undo for the given plants only, so changes others made to other plants in the meantime are kept. */
+export function restorePlants(current, previous, ids) {
+  const before = new Map(previous.filter((p) => ids.includes(p.id)).map((p) => [p.id, p]));
+  const kept = current.filter((p) => !ids.includes(p.id) || before.has(p.id)).map((p) => before.get(p.id) ?? p);
+  const restored = [...before.values()].filter((p) => !current.some((c) => c.id === p.id));
+  return [...kept, ...restored].sort((a, b) => a.order - b.order);
+}
+
+/**
+ * What this device should add to the shared garden the first time it connects:
+ * waterings recorded here before the switch, and plants that were added on this device.
+ */
+export function mergeLocalPlants(local, cloud) {
+  const shared = new Map(cloud.map((p) => [p.id, p]));
+  const changes = [];
+  for (const plant of local) {
+    const match = shared.get(plant.id);
+    if (!match) {
+      // Starting plants missing from the cloud were deleted there on purpose; only plants made here are added.
+      if (plant.id.startsWith('p-')) changes.push(plant);
+      continue;
+    }
+    const history = [...new Set([...match.history, ...plant.history])].sort().reverse().slice(0, MAX_HISTORY);
+    if (history.length !== match.history.length) changes.push({ ...match, history });
+  }
+  return changes;
+}
+
+function normalizePlant(p, index) {
   if (!p || typeof p !== 'object') return null;
   const name = String(p.name ?? '').trim().slice(0, 60);
   if (!name) return null;
@@ -180,6 +219,7 @@ function normalizePlant(p) {
     notes: String(p.notes ?? '').trim().slice(0, 500),
     history,
     snoozedUntil: isISODate(p.snoozedUntil) ? p.snoozedUntil : null,
+    order: Number.isFinite(p.order) ? p.order : index * 1000,
   };
 }
 

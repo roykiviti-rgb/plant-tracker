@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// The garden is shared with everyone who opens the site (no sign-in), so anyone may read and edit it.
+// These rules only accept the app's own data shapes, so the database can't be used for anything else.
+// Paste this file into Firebase console → Firestore Database → Rules, then Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /gardens/main {
+      allow get: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['initialized', 'lastReminder'])
+        && request.resource.data.get('lastReminder', '') is string;
+
+      match /plants/{plantId} {
+        allow read, delete: if true;
+        allow create, update: if plantId.size() <= 40 && isPlant(request.resource.data);
+      }
+
+      // Phones that turned on the daily reminder (the server reads them every morning).
+      match /subscribers/{subscriberId} {
+        allow read, delete: if true;
+        allow create, update: if subscriberId.size() == 64 && isSubscriber(request.resource.data);
+      }
+    }
+
+    function isPlant(p) {
+      return p.keys().hasOnly(['name', 'location', 'intervalDays', 'emoji', 'photo', 'notes',
+                               'history', 'snoozedUntil', 'order', 'updatedAt'])
+        && p.name is string && p.name.size() > 0 && p.name.size() <= 200
+        && p.location is string && p.location.size() <= 200
+        && p.intervalDays is int && p.intervalDays >= 1 && p.intervalDays <= 365
+        && p.emoji is string && p.emoji.size() <= 32
+        && (p.photo == null || (p.photo is string && p.photo.size() <= 400000))
+        && p.notes is string && p.notes.size() <= 2000
+        && p.history is list && p.history.size() <= 100
+        && (p.snoozedUntil == null || p.snoozedUntil is string)
+        && p.order is number
+        && p.updatedAt is timestamp;
+    }
+
+    function isSubscriber(s) {
+      return s.keys().hasOnly(['endpoint', 'p256dh', 'auth', 'timeZone', 'createdAt', 'lastTest'])
+        && s.endpoint is string && s.endpoint.size() <= 1000 && s.endpoint.matches('https://.+')
+        && s.p256dh is string && s.p256dh.size() <= 200
+        && s.auth is string && s.auth.size() <= 100
+        && s.timeZone is string && s.timeZone.size() <= 64;
+    }
+  }
+}

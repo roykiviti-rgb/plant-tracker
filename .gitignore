@@ -1,6 +1,7 @@
 node_modules/
 .vercel/
 .claude/
+.env*
 
 # Original full-size photos (the site uses the resized copies in public/plants/)
 תמונות/

@@ -120,6 +120,12 @@ const PLANTS = [
 export function createSeedState() {
   return {
     version: 1,
-    plants: PLANTS.map((p) => ({ ...p, photo: `plants/${p.id}.jpg`, history: [], snoozedUntil: null })),
+    plants: PLANTS.map((p, index) => ({
+      ...p,
+      photo: `plants/${p.id}.jpg`,
+      history: [],
+      snoozedUntil: null,
+      order: index * 1000,
+    })),
   };
 }
